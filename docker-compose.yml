@@ -1,0 +1,22 @@
+services:
+  library:
+    build:
+      context: ../library
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:oracle:thin:@tg243br3udtanbr0_tp?TNS_ADMIN=/app/oracle_wallet
+      SPRING_DATASOURCE_USERNAME: FULLSTACK3
+      SPRING_DATASOURCE_PASSWORD: Duoc123#fullstack
+    restart: unless-stopped
+
+  library-ng:
+    build: .
+    ports:
+      - "8088:80"
+    depends_on:
+      - library
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
