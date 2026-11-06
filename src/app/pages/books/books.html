@@ -1,0 +1,61 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Libros</h1>
+  @if (auth.isAuthenticated()) {
+    <a class="btn btn-dark" routerLink="/libros/nuevo">Nuevo libro</a>
+  }
+</div>
+
+@if (!auth.isAuthenticated()) {
+  <div class="alert alert-secondary">
+    Puedes ver el catálogo sin sesión. Para crear, editar o eliminar,
+    <a routerLink="/login">inicia sesión</a>.
+  </div>
+}
+
+@if (notice()) {
+  <div class="alert alert-success" role="alert">{{ notice() }}</div>
+}
+@if (error()) {
+  <div class="alert alert-danger" role="alert">{{ error() }}</div>
+}
+@if (loading()) {
+  <p>Cargando libros…</p>
+} @else if (books().length === 0 && !error()) {
+  <p>No hay libros cargados.</p>
+} @else if (books().length > 0) {
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Título</th>
+          <th>Autor</th>
+          <th>Año</th>
+          <th>Género</th>
+          @if (auth.isAuthenticated()) {
+            <th></th>
+          }
+        </tr>
+      </thead>
+      <tbody>
+        @for (book of books(); track book.id) {
+          <tr>
+            <td>{{ book.id }}</td>
+            <td>{{ book.title }}</td>
+            <td>{{ book.author }}</td>
+            <td>{{ book.year }}</td>
+            <td>{{ book.genre }}</td>
+            @if (auth.isAuthenticated()) {
+              <td class="text-end text-nowrap">
+                <a class="btn btn-sm btn-outline-dark me-2" [routerLink]="['/libros', book.id]">Editar</a>
+                <button class="btn btn-sm btn-outline-danger" type="button" (click)="remove(book)">
+                  Eliminar
+                </button>
+              </td>
+            }
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}

@@ -1,0 +1,16 @@
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container">
+    <a class="navbar-brand" routerLink="/libros">Biblioteca</a>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      @if (auth.isAuthenticated()) {
+        <span class="navbar-text text-white">{{ auth.currentUser()?.nombre }}</span>
+        <a class="btn btn-outline-light btn-sm" routerLink="/libros/nuevo">Nuevo libro</a>
+        <button class="btn btn-outline-light btn-sm" type="button" (click)="logout()">
+          Cerrar sesión
+        </button>
+      } @else {
+        <a class="btn btn-outline-light btn-sm" routerLink="/login">Iniciar sesión</a>
+      }
+    </div>
+  </div>
+</nav>

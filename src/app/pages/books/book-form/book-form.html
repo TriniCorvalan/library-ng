@@ -1,0 +1,44 @@
+<h1 class="h3 mb-3">{{ editingId === null ? 'Nuevo libro' : 'Editar libro' }}</h1>
+
+@if (error()) {
+  <div class="alert alert-danger" role="alert">{{ error() }}</div>
+}
+
+@if (loading()) {
+  <p>Cargando libro…</p>
+} @else if (editingId !== undefined) {
+  <form class="col-lg-8" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div class="mb-3">
+      <label class="form-label" for="title">Título</label>
+      <input id="title" class="form-control" formControlName="title" />
+      @if (form.controls.title.invalid && form.controls.title.touched) {
+        <div class="form-text text-danger">El título es obligatorio.</div>
+      }
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="author">Autor</label>
+      <input id="author" class="form-control" formControlName="author" />
+      @if (form.controls.author.invalid && form.controls.author.touched) {
+        <div class="form-text text-danger">El autor es obligatorio.</div>
+      }
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="genre">Género</label>
+      <input id="genre" class="form-control" formControlName="genre" />
+      @if (form.controls.genre.invalid && form.controls.genre.touched) {
+        <div class="form-text text-danger">El género es obligatorio.</div>
+      }
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="year">Año de publicación</label>
+      <input id="year" type="number" class="form-control" formControlName="year" />
+      @if (form.controls.year.invalid && form.controls.year.touched) {
+        <div class="form-text text-danger">Ingresá un año entre 1 y 2100.</div>
+      }
+    </div>
+    <button class="btn btn-dark me-2" type="submit" [disabled]="submitting()">
+      {{ submitting() ? 'Guardando…' : 'Guardar' }}
+    </button>
+    <a class="btn btn-outline-secondary" routerLink="/libros">Cancelar</a>
+  </form>
+}
