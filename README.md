@@ -1,59 +1,112 @@
-# LibraryNg
+# library-ng
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.2.1.
+Frontend Angular de la **biblioteca** (DUOC Full Stack III — Exp 2 Semana 3).
 
-## Development server
+Gestiona libros consumiendo el microservicio [`library-fullstack3`](https://github.com/TriniCorvalan/library-fullstack3) y autenticación JWT vía [`ms-usuarios`](https://github.com/TriniCorvalan/ms-usuarios).
 
-To start a local development server, run:
+| Capacidad | Detalle |
+|-----------|---------|
+| Stack | Angular 21 (standalone), Bootstrap 5, RxJS |
+| Lectura | Pública (`GET /books`, listado sin login) |
+| Escritura | Requiere JWT (`POST` / `PUT` / `DELETE`) |
+| Auth | Login en `ms-usuarios` (`:8081`); `library` valida el mismo `jwt.secret` |
 
-```bash
-ng serve
+## Arquetipo y patrones de diseño
+
+### Arquetipo MVC
+
+| Pieza | En este proyecto |
+|-------|------------------|
+| **Modelo** | Interfaces (`Book`, `Usuario`) + servicios HTTP (`BookService`, `AuthService`) |
+| **Vista** | Templates HTML de `pages/` y `shared/` |
+| **Controlador** | Componentes de página (`Books`, `BookForm`, `Login`) que orquestan formulario, rutas y llamadas al modelo |
+
+Estructura por capas (mismo criterio que un arquetipo Angular tipo core / pages / shared):
+
+```
+src/app/
+  core/          → modelo + infraestructura (constants, services, guards, interceptors)
+  pages/         → pantallas (controladores + vistas)
+  shared/        → UI reutilizable (header)
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+### Patrón Singleton
 
-## Code scaffolding
+`AuthService` y `BookService` usan `@Injectable({ providedIn: 'root' })`: Angular crea **una sola instancia** compartida en toda la aplicación (inyección de dependencias).
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+### Patrón Observer
 
-```bash
-ng generate component component-name
-```
+Los métodos de los servicios devuelven `Observable` de RxJS. Las páginas se **suscriben** a las respuestas HTTP (`HttpClient`) y reaccionan cuando llegan datos o errores. El `authInterceptor` también participa en el flujo de cada request.
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+## Rutas de la SPA
 
-```bash
-ng generate --help
-```
+| Ruta | Acceso | Función |
+|------|--------|---------|
+| `/libros` | Público | Listado; botones de mutación solo con sesión |
+| `/login` | Público | Login contra `ms-usuarios` |
+| `/libros/nuevo` | Autenticado | Crear libro |
+| `/libros/:id` | Autenticado | Editar libro |
 
-## Building
+Atributos del libro (iguales al microservicio): `id`, `title`, `author`, `year`, `genre`.
 
-To build the project run:
+## Credenciales de prueba
 
-```bash
-ng build
-```
+| Email | Password | Origen |
+|-------|----------|--------|
+| `admin@foro.cl` | `Admin123!` | Seed de `ms-usuarios` |
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+## Cómo ejecutar (desarrollo local)
 
-## Running unit tests
+Necesitas tres procesos:
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
+1. **ms-usuarios** (JWT) en `:8081`
+2. **library** (CRUD libros) en `:8080`
+3. **library-ng** con `ng serve` en `:4200`
 
 ```bash
-ng e2e
+# Terminal 1 — auth
+cd "[...]/ms-usuarios"
+./mvnw spring-boot:run
+
+# Terminal 2 — libros
+cd ../library
+./mvnw spring-boot:run
+
+# Terminal 3 — front
+cd ../library-ng
+npm start
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+Abrí http://localhost:4200
 
-## Additional Resources
+En desarrollo, las URLs del API están en `src/environments/environment.ts` (`localhost:8080` y `localhost:8081`).
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+## Cómo ejecutar con Docker
+
+El `docker-compose.yml` de este proyecto levanta **library** + **library-ng**.  
+`ms-usuarios` sigue corriendo en el host (puerto 8081); nginx del front hace proxy de `/auth/` hacia `host.docker.internal:8081` y de `/books` hacia el servicio `library`.
+
+```bash
+# Primero ms-usuarios en el host
+cd "[...]/ms-usuarios"
+./mvnw spring-boot:run
+
+# Luego compose (desde library-ng)
+cd ../../library-ng
+docker compose up --build
+```
+
+| Servicio | URL |
+|----------|-----|
+| Frontend | http://localhost:8088 |
+| API libros | http://localhost:8080/books |
+
+Build de producción usa `environment.prod.ts` (rutas relativas `/books` y `/auth/...`).
+
+## Flujo de autenticación (opción 2B)
+
+1. El usuario inicia sesión en el front → `POST http://localhost:8081/auth/login`.
+2. Se guarda el JWT en `localStorage`.
+3. El interceptor agrega `Authorization: Bearer <token>` a las peticiones.
+4. `library` valida el token con el **mismo** `jwt.secret` que `ms-usuarios`.
+5. `GET` de libros no exige token; `POST` / `PUT` / `DELETE` sí (401 sin token).
