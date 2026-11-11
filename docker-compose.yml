@@ -5,10 +5,12 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    env_file:
+      - ../library/.env
     environment:
-      SPRING_DATASOURCE_URL: jdbc:oracle:thin:@tg243br3udtanbr0_tp?TNS_ADMIN=/app/oracle_wallet
-      SPRING_DATASOURCE_USERNAME: FULLSTACK3
-      SPRING_DATASOURCE_PASSWORD: Duoc123#fullstack
+      TNS_ADMIN: /app/wallet
+    volumes:
+      - ../library/Wallet_TG243BR3UDTANBR0:/app/wallet:ro
     restart: unless-stopped
 
   library-ng:
