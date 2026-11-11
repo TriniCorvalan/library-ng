@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 10
     env:
       AWS_REGION: us-east-1
-      AWS_ACCOUNT_ID: "622519216316"
+      AWS_ACCOUNT_ID: "533267145144"
       ORACLE_CREDENTIALS_SECRET: library/oracle-db-credentials
       ORACLE_WALLET_SECRET: library/oracle-wallet
 

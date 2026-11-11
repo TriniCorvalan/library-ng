@@ -23,9 +23,9 @@ jobs:
     timeout-minutes: 60
     env:
       AWS_REGION: us-east-1
-      AWS_ACCOUNT_ID: "622519216316"
+      AWS_ACCOUNT_ID: "533267145144"
       ECS_CLUSTER: library-ng-cluster
-      EXECUTION_ROLE_ARN: arn:aws:iam::622519216316:role/LabRole
+      EXECUTION_ROLE_ARN: arn:aws:iam::533267145144:role/LabRole
       ECR_REPOSITORY: library
       STACK_NAME: library-api-http
       ORACLE_CREDENTIALS_SECRET_ARN: ${{ vars.ORACLE_CREDENTIALS_SECRET_ARN }}

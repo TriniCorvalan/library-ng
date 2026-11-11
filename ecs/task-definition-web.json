@@ -4,11 +4,11 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::622519216316:role/LabRole",
+  "executionRoleArn": "arn:aws:iam::533267145144:role/LabRole",
   "containerDefinitions": [
     {
       "name": "library-ng",
-      "image": "622519216316.dkr.ecr.us-east-1.amazonaws.com/library-ng:REPLACE_AFTER_PUBLISH_ECR",
+      "image": "533267145144.dkr.ecr.us-east-1.amazonaws.com/library-ng:REPLACE_AFTER_PUBLISH_ECR",
       "essential": true,
       "portMappings": [
         {

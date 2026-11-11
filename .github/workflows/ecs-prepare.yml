@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     env:
       AWS_REGION: us-east-1
-      AWS_ACCOUNT_ID: "622519216316"
+      AWS_ACCOUNT_ID: "533267145144"
       ECS_CLUSTER: library-ng-cluster
       ECR_REPOSITORY: library-ng
       LOG_GROUP: /ecs/library-ng
