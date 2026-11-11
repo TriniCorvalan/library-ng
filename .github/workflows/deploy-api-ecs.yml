@@ -1,5 +1,5 @@
 name: Deploy Library API to ECS
-
+#trigger
 on:
   workflow_dispatch:
   # Para dispararlo sin estar en main: tocá solo este archivo y pusheá prepare-ecr-ecs.
