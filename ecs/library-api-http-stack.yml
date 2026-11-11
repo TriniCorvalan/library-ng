@@ -51,6 +51,9 @@ Parameters:
 Resources:
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
+    # Conservar logs si el stack hace rollback (si no, se borra /ecs/library-api-http).
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Metadata:
       com.aws.cloudformation.Context:
         why: retain concise API runtime logs for deployment diagnosis
