@@ -1,0 +1,103 @@
+name: Prepare Amazon ECS resources
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - prepare-ecr-ecs
+    paths:
+      - '.github/workflows/ecs-prepare.yml'
+      - 'ecs/task-definition-web.json'
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Create ECS cluster and register task
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: "622519216316"
+      ECS_CLUSTER: library-ng-cluster
+      ECR_REPOSITORY: library-ng
+      LOG_GROUP: /ecs/library-ng
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify Academy account
+        shell: bash
+        run: |
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [[ "$account_id" != "$AWS_ACCOUNT_ID" ]]; then
+            echo "::error::Credentials point to account $account_id, not $AWS_ACCOUNT_ID."
+            exit 1
+          fi
+
+      - name: Create ECS cluster and log group
+        shell: bash
+        run: |
+          cluster_status="$(aws ecs describe-clusters \
+            --clusters "$ECS_CLUSTER" \
+            --region "$AWS_REGION" \
+            --query 'clusters[0].status' --output text)"
+
+          if [[ "$cluster_status" != "ACTIVE" ]]; then
+            aws ecs create-cluster \
+              --cluster-name "$ECS_CLUSTER" \
+              --tags key=Project,value=library-ng \
+              --region "$AWS_REGION"
+          else
+            echo "ECS cluster $ECS_CLUSTER already exists."
+          fi
+
+          log_group_count="$(aws logs describe-log-groups \
+            --log-group-name-prefix "$LOG_GROUP" \
+            --region "$AWS_REGION" \
+            --query "length(logGroups[?logGroupName=='$LOG_GROUP'])" --output text)"
+
+          if [[ "$log_group_count" == "0" ]]; then
+            aws logs create-log-group --log-group-name "$LOG_GROUP" --region "$AWS_REGION"
+            aws logs put-retention-policy \
+              --log-group-name "$LOG_GROUP" \
+              --retention-in-days 7 \
+              --region "$AWS_REGION"
+          else
+            echo "CloudWatch log group $LOG_GROUP already exists; keeping its retention settings."
+          fi
+
+      - name: Register Fargate task definition for the frontend
+        shell: bash
+        run: |
+          image_tag="$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --filter tagStatus=TAGGED \
+            --query 'sort_by(imageDetails[?imageTags!=null], &imagePushedAt)[-1].imageTags[0]' \
+            --output text 2>/dev/null || true)"
+
+          if [[ ! "$image_tag" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::warning::No SHA-tagged library-ng image in ECR yet. Cluster/log group are ready; skip task registration until publish-ecr for the frontend."
+            exit 0
+          fi
+
+          task_file="$RUNNER_TEMP/task-definition-web.json"
+          jq --arg image "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$image_tag" \
+            '.containerDefinitions[0].image = $image' \
+            ecs/task-definition-web.json > "$task_file"
+
+          aws ecs register-task-definition \
+            --cli-input-json "file://$task_file" \
+            --region "$AWS_REGION" \
+            --query 'taskDefinition.{family:family,revision:revision,taskDefinitionArn:taskDefinitionArn,executionRoleArn:executionRoleArn}' \
+            --output json

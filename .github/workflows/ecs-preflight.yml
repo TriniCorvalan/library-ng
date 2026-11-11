@@ -1,0 +1,143 @@
+name: Check ECS deployment prerequisites
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - prepare-ecr-ecs
+    paths:
+      - '.github/workflows/ecs-preflight.yml'
+      - 'ecs/**'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Inspect AWS deployment prerequisites
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: "622519216316"
+      ORACLE_CREDENTIALS_SECRET: library/oracle-db-credentials
+      ORACLE_WALLET_SECRET: library/oracle-wallet
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Inspect ECS, image, IAM roles, and networking
+        shell: bash
+        run: |
+          failed=0
+
+          check_read() {
+            label="$1"
+            shift
+            if output="$("$@" 2>&1)"; then
+              echo "=== $label ==="
+              echo "$output"
+            else
+              status=$?
+              echo "::error::$label failed (exit $status)"
+              echo "$output"
+              failed=1
+            fi
+          }
+
+          check_optional() {
+            label="$1"
+            shift
+            if output="$("$@" 2>&1)"; then
+              echo "=== $label ==="
+              echo "$output"
+            else
+              echo "::warning::$label not available yet (optional for API-only demo)."
+              echo "$output"
+            fi
+          }
+
+          if account_id="$(aws sts get-caller-identity --query Account --output text 2>&1)"; then
+            :
+          else
+            status=$?
+            echo "::error::Could not identify AWS account (exit $status)"
+            echo "$account_id"
+            exit "$status"
+          fi
+          if [[ "$account_id" != "$AWS_ACCOUNT_ID" ]]; then
+            echo "::error::Credentials point to account $account_id, not $AWS_ACCOUNT_ID."
+            exit 1
+          fi
+          echo "AWS account: $account_id"
+
+          check_read "ECS clusters" aws ecs list-clusters \
+            --region "$AWS_REGION" --query clusterArns --output json
+          check_optional "Published frontend ECR images" aws ecr describe-images \
+            --repository-name library-ng --region "$AWS_REGION" \
+            --query 'imageDetails[].{tags:imageTags,digest:imageDigest,pushed:imagePushedAt}' \
+            --output json
+          check_read "Published backend ECR images" aws ecr describe-images \
+            --repository-name library --region "$AWS_REGION" \
+            --query 'imageDetails[].{tags:imageTags,digest:imageDigest,pushed:imagePushedAt}' \
+            --output json
+          check_read "Oracle database credentials secret metadata" aws secretsmanager describe-secret \
+            --secret-id "$ORACLE_CREDENTIALS_SECRET" --region "$AWS_REGION" \
+            --query '{Name:Name,ARN:ARN,KmsKeyId:KmsKeyId,LastChangedDate:LastChangedDate}' \
+            --output json
+          check_read "Oracle wallet secret metadata" aws secretsmanager describe-secret \
+            --secret-id "$ORACLE_WALLET_SECRET" --region "$AWS_REGION" \
+            --query '{Name:Name,ARN:ARN,KmsKeyId:KmsKeyId,LastChangedDate:LastChangedDate}' \
+            --output json
+
+          check_read "LabRole trust policy" aws iam get-role \
+            --role-name LabRole --query 'Role.{Arn:Arn,Trust:AssumeRolePolicyDocument}' \
+            --output json
+          check_read "LabRole attached policies" aws iam list-attached-role-policies \
+            --role-name LabRole --query 'AttachedPolicies[].{Name:PolicyName,Arn:PolicyArn}' \
+            --output json
+          check_read "LabRole task execution permissions" aws iam simulate-principal-policy \
+            --policy-source-arn "arn:aws:iam::$AWS_ACCOUNT_ID:role/LabRole" \
+            --action-names ecr:GetAuthorizationToken ecr:BatchGetImage ecr:GetDownloadUrlForLayer \
+            logs:CreateLogStream logs:PutLogEvents \
+            --resource-arns '*' \
+            --query 'EvaluationResults[].{Action:EvalActionName,Decision:EvalDecision,MissingContext:MissingContextValues}' \
+            --output json
+          check_read "ECS deployment authorization simulation" aws iam simulate-principal-policy \
+            --policy-source-arn "arn:aws:iam::$AWS_ACCOUNT_ID:role/voclabs" \
+            --action-names ecs:CreateCluster ecs:RegisterTaskDefinition ecs:CreateService ecs:UpdateService \
+            --resource-arns '*' \
+            --query 'EvaluationResults[].{Action:EvalActionName,Decision:EvalDecision,MissingContext:MissingContextValues}' \
+            --output json
+          check_read "CloudWatch log group authorization simulation" aws iam simulate-principal-policy \
+            --policy-source-arn "arn:aws:iam::$AWS_ACCOUNT_ID:role/voclabs" \
+            --action-names logs:CreateLogGroup logs:PutRetentionPolicy \
+            --resource-arns '*' \
+            --query 'EvaluationResults[].{Action:EvalActionName,Decision:EvalDecision,MissingContext:MissingContextValues}' \
+            --output json
+          check_read "LabRole pass permission for ECS tasks" aws iam simulate-principal-policy \
+            --policy-source-arn "arn:aws:iam::$AWS_ACCOUNT_ID:role/voclabs" \
+            --action-names iam:PassRole \
+            --resource-arns "arn:aws:iam::$AWS_ACCOUNT_ID:role/LabRole" \
+            --context-entries ContextKeyName=iam:PassedToService,ContextKeyValues=ecs-tasks.amazonaws.com,ContextKeyType=string \
+            --query 'EvaluationResults[].{Action:EvalActionName,Decision:EvalDecision,MissingContext:MissingContextValues}' \
+            --output json
+
+          check_read "Default VPC" aws ec2 describe-vpcs \
+            --region "$AWS_REGION" --filters Name=isDefault,Values=true \
+            --query 'Vpcs[].{VpcId:VpcId,CidrBlock:CidrBlock,State:State}' --output json
+          check_read "Default subnets" aws ec2 describe-subnets \
+            --region "$AWS_REGION" --filters Name=default-for-az,Values=true \
+            --query 'Subnets[].{SubnetId:SubnetId,VpcId:VpcId,AvailabilityZone:AvailabilityZone,MapPublicIpOnLaunch:MapPublicIpOnLaunch}' \
+            --output json
+
+          if [[ "$failed" -ne 0 ]]; then
+            echo "::error::Preflight found missing resources or insufficient read permissions. No AWS resources were created."
+            exit 1
+          fi
