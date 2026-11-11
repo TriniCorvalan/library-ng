@@ -204,6 +204,11 @@ Resources:
 
   ApiService:
     Type: AWS::ECS::Service
+    # El target group solo queda asociado al ALB cuando existe el Listener.
+    # Sin este DependsOn, ECS puede crear el service antes y falla con:
+    # "target group ... does not have an associated load balancer".
+    DependsOn:
+      - ApiListener
     Metadata:
       com.aws.cloudformation.Context:
         why: keep one API task available behind the load balancer for temporary public demo access

@@ -8,6 +8,8 @@ on:
       - prepare-ecr-ecs
     paths:
       - '.github/workflows/deploy-api-ecs.yml'
+      - 'ecs/library-api-http-stack.yml'
+      - 'ecs/cfn-guard/**'
 
 permissions:
   contents: read
