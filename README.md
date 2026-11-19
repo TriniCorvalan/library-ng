@@ -103,10 +103,98 @@ docker compose up --build
 
 Build de producción usa `environment.prod.ts` (rutas relativas `/books` y `/auth/...`).
 
-## Flujo de autenticación (opción 2B)
+## Flujo de autenticación (opción 2B) — solo local
 
 1. El usuario inicia sesión en el front → `POST http://localhost:8081/auth/login`.
 2. Se guarda el JWT en `localStorage`.
 3. El interceptor agrega `Authorization: Bearer <token>` a las peticiones.
 4. `library` valida el token con el **mismo** `jwt.secret` que `ms-usuarios`.
 5. `GET` de libros no exige token; `POST` / `PUT` / `DELETE` sí (401 sin token).
+
+En AWS **no** se despliega `ms-usuarios`: la demo pública es el listado (`GET /books`).
+
+## Despliegue AWS Academy (EC2) — playbook
+
+Misma idea que el manual del profesor: una EC2 con Nginx en el host, contenedores Docker
+(`library` en `:8080`, `library-ng` en `:4000`) y despliegue por **Systems Manager** desde GitHub Actions.
+Wallet Oracle en **S3**; credenciales en **Secrets Manager**.
+
+Plantilla: [`ec2/library-ec2-stack.yml`](ec2/library-ec2-stack.yml).  
+Workflow de este repo: [`.github/workflows/publish-ecr.yml`](.github/workflows/publish-ecr.yml).  
+API: repo `library` → workflow **Test, publish and deploy API to EC2**.
+
+### 1. Secreto Oracle
+
+En Secrets Manager (misma región, ej. `us-east-1`), secreto tipo key/value:
+
+| Clave | Valor |
+|-------|--------|
+| `DB_URL` | Alias TNS (ej. `tg243br3udtanbr0_tp`) |
+| `DB_USERNAME` | Usuario del esquema |
+| `DB_PASSWORD` | Contraseña |
+
+Anotá el **ARN** completo.
+
+### 2. Crear el stack
+
+CloudFormation → Upload `ec2/library-ec2-stack.yml`:
+
+| Parámetro | Valor típico Academy |
+|-----------|----------------------|
+| `VpcId` / `PublicSubnetId` | VPC y subred **pública** del lab |
+| `OracleCredentialsSecretArn` | ARN del paso 1 |
+| `OracleWalletObjectKey` | `Wallet.zip` |
+| `OracleWalletBucketName` | vacío → crea bucket privado |
+| `CreateInstanceRole` | `false` |
+| `ExistingInstanceProfileName` | `LabInstanceProfile` |
+| `InstanceType` | `t3.medium` (si el lab lo permite) |
+| `AllowedHttpCidr` | `0.0.0.0/0` en la demo |
+
+Esperá **CREATE_COMPLETE**. Outputs: `InstanceId`, `WalletBucketName`, `WalletObjectKey`, `WebsiteUrl`, `PublicIp`.
+
+Confirmá en **Systems Manager → Fleet Manager** que el nodo esté **Online** (y que UserData haya instalado Docker/Nginx).
+
+### 3. Subir el wallet
+
+Subí el ZIP original del wallet a S3 con la clave exacta de `WalletObjectKey`. No lo subas a GitHub.
+
+### 4. Secrets y variables en GitHub
+
+En **ambos** repos (`library` y `library-ng`) → Settings → Secrets and variables → Actions:
+
+**Secrets (ambos):** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (sesión temporal Academy).
+
+**Variables en ambos:**
+
+| Variable | Valor |
+|----------|--------|
+| `AWS_REGION` | `us-east-1` |
+| `EC2_INSTANCE_ID` | `InstanceId` |
+| `AWS_ACCOUNT_ID` | `533267145144` (opcional) |
+
+**Solo en `library`:**
+
+| Variable | Valor |
+|----------|--------|
+| `ORACLE_CREDENTIALS_SECRET_ARN` | ARN del secreto |
+| `ORACLE_WALLET_S3_BUCKET` | `WalletBucketName` |
+| `ORACLE_WALLET_S3_KEY` | `WalletObjectKey` |
+
+### 5. Desplegar (API primero, luego front)
+
+1. Repo **library** → Actions → **Test, publish and deploy API to EC2** → rama `prepare-ecr-ecs` o `main`.
+2. Smoke: `http://IP/books` → JSON array.
+3. Repo **library-ng** → Actions → **Publish and deploy frontend to EC2**.
+4. Abrí `WebsiteUrl` (`http://IP/`). El host Nginx enruta `/books` → API y `/` → front.
+
+Si reiniciás la EC2 sin Elastic IP, la IP pública puede cambiar: actualizá desde la consola EC2 o el último deploy.
+
+### Problemas frecuentes
+
+| Síntoma | Qué revisar |
+|---------|-------------|
+| `NoCredentials` / perfil CLI | Usá `--profile fullstack3` (o el tuyo); las credenciales no están en `default` |
+| Deploy-ec2 falla por `EC2_INSTANCE_ID` | Stack creado + variable seteada en el repo correcto |
+| Wallet / Oracle | Bucket, clave, ZIP con `tnsnames.ora` en la raíz, alias = `DB_URL`, red Oracle |
+| Instancia no Online en SSM | Perfil `LabInstanceProfile`, salida a Internet, agente SSM |
+| Secrets expirados | Renová los tres en **ambos** repos |
