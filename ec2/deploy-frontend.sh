@@ -72,6 +72,8 @@ for attempt in $(seq 1 30); do
 done
 if [[ "$healthy" != true ]]; then
   echo "Frontend health check failed on port 4000." >&2
+  docker logs library-frontend >&2 || true
+  docker inspect --format '{{.State.Status}} {{.State.ExitCode}} {{.State.Error}}' library-frontend >&2 || true
   exit 1
 fi
 
