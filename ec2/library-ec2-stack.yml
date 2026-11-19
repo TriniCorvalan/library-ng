@@ -1,0 +1,274 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 demo host and optional private Oracle wallet bucket, managed through Systems Manager.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    ref:
+      - at: README.md
+        has: deployment and wallet lifecycle guidance
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC that contains the selected public subnet.
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet with a route to an Internet Gateway.
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+    Description: Right-size for the demo workload and check AWS Academy limits.
+  InstanceImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Latest Amazon Linux 2023 x86_64 AMI parameter.
+  AllowedHttpCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[1-2][0-9]|3[0-2])$'
+    Description: IPv4 CIDR allowed to reach the demo over HTTP; restrict this where possible.
+  CreateInstanceRole:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'false'
+      - 'true'
+    Description: Set true outside AWS Academy to create a least-privilege EC2 role and instance profile.
+  ExistingInstanceProfileName:
+    Type: String
+    Default: LabInstanceProfile
+    Description: Existing instance profile when CreateInstanceRole is false (AWS Academy default).
+  OracleCredentialsSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
+    Description: Secret JSON containing DB_URL, DB_USERNAME and DB_PASSWORD.
+  OracleWalletBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Existing private wallet bucket name; leave empty to create a bucket.
+  OracleWalletObjectKey:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9._/-]{1,1024}$'
+    Description: S3 object key for the Oracle wallet ZIP.
+
+Conditions:
+  CreateEc2Role: !Equals [!Ref CreateInstanceRole, 'true']
+  CreateWalletBucket: !Equals [!Ref OracleWalletBucketName, '']
+
+Resources:
+  OracleWalletBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateWalletBucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Isolate the wallet in a generated private bucket without placing it in the template.
+        must:
+          - Keep wallet objects private, encrypted and retained on stack deletion.
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  OracleWalletBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateWalletBucket
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Require TLS when accessing the generated wallet bucket.
+        must:
+          - Deny non-TLS requests to the bucket and its objects.
+    Properties:
+      Bucket: !Ref OracleWalletBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt OracleWalletBucket.Arn
+              - !Sub '${OracleWalletBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  LibraryAppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP for the demo; administration is through Systems Manager.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Public demo HTTP; restrict AllowedHttpCidr when possible.
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedHttpCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  LibraryAppRole:
+    Type: AWS::IAM::Role
+    Condition: CreateEc2Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: LibraryAppRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EcrLogin
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: PullLibraryImages
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/library-ng
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/library
+              - Sid: ReadOracleCredentials
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref OracleCredentialsSecretArn
+              - Sid: ReadOracleWallet
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub
+                  - arn:${AWS::Partition}:s3:::${WalletBucket}/${OracleWalletObjectKey}
+                  - WalletBucket: !If [CreateWalletBucket, !Ref OracleWalletBucket, !Ref OracleWalletBucketName]
+
+  LibraryAppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateEc2Role
+    Properties:
+      Roles:
+        - !Ref LibraryAppRole
+
+  LibraryAppInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref InstanceImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !If
+        - CreateEc2Role
+        - !Ref LibraryAppInstanceProfile
+        - !Ref ExistingInstanceProfileName
+      NetworkInterfaces:
+        - SubnetId: !Ref PublicSubnetId
+          DeviceIndex: '0'
+          AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+          GroupSet:
+            - !Ref LibraryAppSecurityGroup
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 2
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf install -y docker nginx
+          command -v aws
+          systemctl enable --now docker
+          systemctl enable --now amazon-ssm-agent
+          rm -f /etc/nginx/conf.d/default.conf
+          cat > /etc/nginx/conf.d/library.conf <<'NGINX'
+          server {
+              listen 80 default_server;
+              server_name _;
+
+              location /books {
+                  proxy_pass http://127.0.0.1:8080;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location / {
+                  proxy_pass http://127.0.0.1:4000;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+          NGINX
+          nginx -t
+          systemctl enable --now nginx
+          systemctl reload nginx
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}
+        - Key: Application
+          Value: library
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  InstanceId:
+    Description: Set this as the EC2_INSTANCE_ID Actions variable in both repositories.
+    Value: !Ref LibraryAppInstance
+  PublicIp:
+    Description: Public HTTP address for the demo; the instance does not have a fixed IP.
+    Value: !GetAtt LibraryAppInstance.PublicIp
+  WebsiteUrl:
+    Description: Demo frontend URL; HTTP only and unauthenticated.
+    Value: !Sub http://${LibraryAppInstance.PublicIp}/
+  WalletBucketName:
+    Description: Upload the Oracle wallet ZIP here and set ORACLE_WALLET_S3_BUCKET to this value.
+    Value: !If [CreateWalletBucket, !Ref OracleWalletBucket, !Ref OracleWalletBucketName]
+  WalletObjectKey:
+    Description: Set ORACLE_WALLET_S3_KEY to this value.
+    Value: !Ref OracleWalletObjectKey
+  InstanceProfileName:
+    Description: Instance profile used by the EC2 host.
+    Value: !If
+      - CreateEc2Role
+      - !Ref LibraryAppInstanceProfile
+      - !Ref ExistingInstanceProfileName
