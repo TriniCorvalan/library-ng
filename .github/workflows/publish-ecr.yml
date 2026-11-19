@@ -39,8 +39,8 @@ jobs:
         shell: bash
         run: |
           chmod +x ec2/deploy-frontend.sh ec2/deploy-to-instance.sh
-          sh -n ec2/deploy-frontend.sh
-          sh -n ec2/deploy-to-instance.sh
+          bash -n ec2/deploy-frontend.sh
+          bash -n ec2/deploy-to-instance.sh
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.3.0
