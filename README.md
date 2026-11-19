@@ -135,24 +135,24 @@ En Secrets Manager (misma región, ej. `us-east-1`), secreto tipo key/value:
 
 Anotá el **ARN** completo.
 
-### 2. Crear el stack
+### 2. Crear el stack (automatizado)
 
-CloudFormation → Upload `ec2/library-ec2-stack.yml`:
+En **library-ng** → Settings → Variables, además de las del paso 4:
 
-| Parámetro | Valor típico Academy |
-|-----------|----------------------|
-| `VpcId` / `PublicSubnetId` | VPC y subred **pública** del lab |
-| `OracleCredentialsSecretArn` | ARN del paso 1 |
-| `OracleWalletObjectKey` | `Wallet.zip` |
-| `OracleWalletBucketName` | vacío → crea bucket privado |
-| `CreateInstanceRole` | `false` |
-| `ExistingInstanceProfileName` | `LabInstanceProfile` |
-| `InstanceType` | `t3.medium` (si el lab lo permite) |
-| `AllowedHttpCidr` | `0.0.0.0/0` en la demo |
+| Variable | Valor |
+|----------|--------|
+| `ORACLE_CREDENTIALS_SECRET_ARN` | ARN del secreto (también en este repo) |
+| `ORACLE_WALLET_S3_KEY` | `Wallet.zip` (opcional; default) |
+| `ORACLE_WALLET_S3_BUCKET` | vacío = el stack crea el bucket |
+| `VPC_ID` / `PUBLIC_SUBNET_ID` | opcionales; si faltan, el script intenta detectar VPC default y una subred pública |
 
-Esperá **CREATE_COMPLETE**. Outputs: `InstanceId`, `WalletBucketName`, `WalletObjectKey`, `WebsiteUrl`, `PublicIp`.
+Luego: Actions → **Prepare EC2 CloudFormation stack** → Run workflow.
 
-Confirmá en **Systems Manager → Fleet Manager** que el nodo esté **Online** (y que UserData haya instalado Docker/Nginx).
+Eso ejecuta `ec2/prepare-stack.sh` con `ec2/library-ec2-stack.yml`. Al terminar, el resumen del job muestra `InstanceId`, bucket del wallet y `WebsiteUrl`.
+
+Confirmá en **Systems Manager → Fleet Manager** que el nodo esté **Online** (UserData instala Docker/Nginx).
+
+Alternativa manual: CloudFormation → Upload `ec2/library-ec2-stack.yml` con `CreateInstanceRole=false` y `LabInstanceProfile`.
 
 ### 3. Subir el wallet
 

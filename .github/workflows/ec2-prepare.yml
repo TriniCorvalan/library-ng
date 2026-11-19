@@ -1,0 +1,69 @@
+name: Prepare EC2 CloudFormation stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: library-ec2-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Create or update EC2 stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || '533267145144' }}
+      STACK_NAME: ${{ vars.EC2_STACK_NAME || 'library-ec2' }}
+      ORACLE_CREDENTIALS_SECRET_ARN: ${{ vars.ORACLE_CREDENTIALS_SECRET_ARN }}
+      ORACLE_WALLET_S3_BUCKET: ${{ vars.ORACLE_WALLET_S3_BUCKET }}
+      ORACLE_WALLET_S3_KEY: ${{ vars.ORACLE_WALLET_S3_KEY || 'Wallet.zip' }}
+      VPC_ID: ${{ vars.VPC_ID }}
+      PUBLIC_SUBNET_ID: ${{ vars.PUBLIC_SUBNET_ID }}
+      CREATE_INSTANCE_ROLE: ${{ vars.CREATE_INSTANCE_ROLE || 'false' }}
+      EXISTING_INSTANCE_PROFILE_NAME: ${{ vars.EXISTING_INSTANCE_PROFILE_NAME || 'LabInstanceProfile' }}
+      INSTANCE_TYPE: ${{ vars.INSTANCE_TYPE || 't3.medium' }}
+      ALLOWED_HTTP_CIDR: ${{ vars.ALLOWED_HTTP_CIDR || '0.0.0.0/0' }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate prepare script
+        shell: bash
+        run: |
+          chmod +x ec2/prepare-stack.sh
+          bash -n ec2/prepare-stack.sh
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS account
+        shell: bash
+        run: |
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [[ ! "$account_id" =~ ^[0-9]{12}$ ]]; then
+            echo "::error::Could not determine the AWS account ID."
+            exit 1
+          fi
+          if [[ -n "$EXPECTED_AWS_ACCOUNT_ID" && "$account_id" != "$EXPECTED_AWS_ACCOUNT_ID" ]]; then
+            echo "::error::Credentials point to account $account_id, not $EXPECTED_AWS_ACCOUNT_ID."
+            exit 1
+          fi
+          if [[ -z "$ORACLE_CREDENTIALS_SECRET_ARN" ]]; then
+            echo "::error::Set Actions variable ORACLE_CREDENTIALS_SECRET_ARN in library-ng (same ARN as in library)."
+            exit 1
+          fi
+
+      - name: Deploy CloudFormation stack
+        shell: bash
+        run: bash ec2/prepare-stack.sh "$AWS_REGION" "$STACK_NAME" ec2/library-ec2-stack.yml
